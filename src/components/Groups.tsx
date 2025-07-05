@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { Plus, Users, Trash2, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -20,9 +21,6 @@ interface GroupsProps {
   selectedGroup: Group | null;
 }
 
-// Backend API base URL – adjust if your server runs elsewhere
-const API_BASE = 'http://localhost:4000';
-
 const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
   const [groups, setGroups] = useState<Group[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -30,52 +28,23 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
   const [newGroupForm, setNewGroupForm] = useState({ name: '', description: '' });
   const [newMemberName, setNewMemberName] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
 
-  // Helper function to handle API responses
-  const handleApiResponse = async (response: Response) => {
-    const contentType = response.headers.get('content-type');
-    
-    if (!response.ok) {
-      if (contentType && contentType.includes('application/json')) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
-      } else {
-        // If it's not JSON, it might be an HTML error page
-        const text = await response.text();
-        if (text.includes('<!DOCTYPE')) {
-          throw new Error('Server returned an HTML page instead of JSON. Please check if the backend server is running.');
-        }
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-      }
-    }
-
-    if (contentType && contentType.includes('application/json')) {
-      return await response.json();
-    } else {
-      throw new Error('Server did not return JSON data');
-    }
-  };
-
-  // Fetch groups on component mount
+  // Load groups from localStorage on component mount
   useEffect(() => {
-    const fetchGroups = async () => {
+    const loadGroups = () => {
       try {
         setIsLoading(true);
-        setError(null);
-        
-        const response = await fetch(`${API_BASE}/groups`);
-        const data = await handleApiResponse(response);
-        setGroups(data);
+        const storedGroups = localStorage.getItem('groups');
+        if (storedGroups) {
+          const parsedGroups = JSON.parse(storedGroups);
+          setGroups(parsedGroups);
+        }
       } catch (error) {
-        console.error('Error fetching groups:', error);
-        const errorMessage = error instanceof Error ? error.message : 'Failed to fetch groups';
-        setError(errorMessage);
-        
+        console.error('Error loading groups from localStorage:', error);
         toast({
-          title: 'Connection Error',
-          description: 'Unable to connect to the server. Please make sure the backend is running on port 4000.',
+          title: 'Error',
+          description: 'Failed to load groups from storage',
           variant: 'destructive',
         });
       } finally {
@@ -83,26 +52,40 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
       }
     };
 
-    fetchGroups();
+    loadGroups();
   }, [toast]);
+
+  // Save groups to localStorage whenever groups change
+  const saveGroups = (updatedGroups: Group[]) => {
+    try {
+      localStorage.setItem('groups', JSON.stringify(updatedGroups));
+      setGroups(updatedGroups);
+    } catch (error) {
+      console.error('Error saving groups to localStorage:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to save groups',
+        variant: 'destructive',
+      });
+    }
+  };
 
   const createGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGroupForm.name.trim()) return;
 
     try {
-      const response = await fetch(`${API_BASE}/groups`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: newGroupForm.name.trim(),
-          description: newGroupForm.description.trim(),
-        }),
-      });
+      const newGroup: Group = {
+        id: Date.now().toString(),
+        name: newGroupForm.name.trim(),
+        description: newGroupForm.description.trim(),
+        members: [],
+        createdAt: new Date().toISOString(),
+      };
 
-      const newGroup = await handleApiResponse(response);
-
-      setGroups([...groups, newGroup]);
+      const updatedGroups = [...groups, newGroup];
+      saveGroups(updatedGroups);
+      
       setNewGroupForm({ name: '', description: '' });
       setShowCreateForm(false);
 
@@ -112,11 +95,9 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
       });
     } catch (error) {
       console.error('Error creating group:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to create group';
-      
       toast({
         title: 'Error',
-        description: errorMessage,
+        description: 'Failed to create group',
         variant: 'destructive',
       });
     }
@@ -128,15 +109,16 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
     const memberUsername = newMemberName.trim();
 
     try {
-      const response = await fetch(`${API_BASE}/groups/${groupId}/members`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: memberUsername }),
+      const updatedGroups = groups.map((group) => {
+        if (group.id === groupId) {
+          if (!group.members.includes(memberUsername)) {
+            return { ...group, members: [...group.members, memberUsername] };
+          }
+        }
+        return group;
       });
 
-      const updatedGroup = await handleApiResponse(response);
-      setGroups(groups.map((g) => (g.id === groupId ? updatedGroup : g)));
-
+      saveGroups(updatedGroups);
       setNewMemberName('');
       setShowAddMember(null);
 
@@ -146,11 +128,9 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
       });
     } catch (error) {
       console.error('Error adding member:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to add member';
-      
       toast({
         title: 'Error',
-        description: errorMessage,
+        description: 'Failed to add member',
         variant: 'destructive',
       });
     }
@@ -158,12 +138,14 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
 
   const removeMember = async (groupId: string, memberUsername: string) => {
     try {
-      const response = await fetch(`${API_BASE}/groups/${groupId}/members/${memberUsername}`, {
-        method: 'DELETE',
+      const updatedGroups = groups.map((group) => {
+        if (group.id === groupId) {
+          return { ...group, members: group.members.filter(m => m !== memberUsername) };
+        }
+        return group;
       });
-      
-      const updatedGroup = await handleApiResponse(response);
-      setGroups(groups.map((g) => (g.id === groupId ? updatedGroup : g)));
+
+      saveGroups(updatedGroups);
 
       toast({
         title: 'Member Removed',
@@ -171,11 +153,9 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
       });
     } catch (error) {
       console.error('Error removing member:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to remove member';
-      
       toast({
         title: 'Error',
-        description: errorMessage,
+        description: 'Failed to remove member',
         variant: 'destructive',
       });
     }
@@ -183,13 +163,9 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
 
   const deleteGroup = async (groupId: string) => {
     try {
-      const response = await fetch(`${API_BASE}/groups/${groupId}`, { 
-        method: 'DELETE' 
-      });
-      
-      const deletedGroup = await handleApiResponse(response);
-
-      setGroups(groups.filter((group) => group.id !== groupId));
+      const groupToDelete = groups.find(g => g.id === groupId);
+      const updatedGroups = groups.filter((group) => group.id !== groupId);
+      saveGroups(updatedGroups);
 
       if (selectedGroup?.id === groupId) {
         onGroupSelect(null);
@@ -197,15 +173,13 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
 
       toast({
         title: 'Group Deleted',
-        description: `Deleted group "${deletedGroup?.name || 'Unknown'}"`,
+        description: `Deleted group "${groupToDelete?.name || 'Unknown'}"`,
       });
     } catch (error) {
       console.error('Error deleting group:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to delete group';
-      
       toast({
         title: 'Error',
-        description: errorMessage,
+        description: 'Failed to delete group',
         variant: 'destructive',
       });
     }
@@ -221,31 +195,6 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
           <CardContent>
             <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-purple-600 mx-auto mb-4"></div>
             <p className="text-gray-500">Loading groups...</p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <h2 className="text-3xl font-bold text-gray-800">Groups</h2>
-        </div>
-        <Card className="text-center py-12 border-red-200 bg-red-50">
-          <CardContent>
-            <div className="text-red-600 mb-4">
-              <Users className="mx-auto h-16 w-16 mb-4 opacity-50" />
-              <h3 className="text-xl font-semibold mb-2">Connection Error</h3>
-              <p className="text-sm mb-4">{error}</p>
-              <Button 
-                onClick={() => window.location.reload()}
-                className="bg-red-600 hover:bg-red-700"
-              >
-                Retry
-              </Button>
-            </div>
           </CardContent>
         </Card>
       </div>
