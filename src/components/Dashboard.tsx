@@ -50,6 +50,69 @@ const decryptData = (encryptedData: string): string => {
   }
 };
 
+// Password validation function
+const validatePassword = (email: string, password: string): boolean => {
+  const storedUsers = localStorage.getItem('splitEasyUsers');
+  if (!storedUsers) return false;
+  
+  try {
+    const decryptedUsers = decryptData(storedUsers);
+    const users = JSON.parse(decryptedUsers);
+    const user = users.find((u: any) => u.email === email);
+    return user && user.password === password;
+  } catch {
+    return false;
+  }
+};
+
+// Store user function
+const storeUser = (email: string, password: string, name: string) => {
+  const storedUsers = localStorage.getItem('splitEasyUsers');
+  let users = [];
+  
+  if (storedUsers) {
+    try {
+      const decryptedUsers = decryptData(storedUsers);
+      users = JSON.parse(decryptedUsers);
+    } catch {
+      users = [];
+    }
+  }
+  
+  // Check if user already exists
+  const existingUserIndex = users.findIndex((u: any) => u.email === email);
+  if (existingUserIndex >= 0) {
+    users[existingUserIndex] = { email, password, name };
+  } else {
+    users.push({ email, password, name });
+  }
+  
+  const encryptedUsers = encryptData(JSON.stringify(users));
+  localStorage.setItem('splitEasyUsers', encryptedUsers);
+};
+
+// Update user password function
+const updateUserPassword = (email: string, currentPassword: string, newPassword: string): boolean => {
+  const storedUsers = localStorage.getItem('splitEasyUsers');
+  if (!storedUsers) return false;
+  
+  try {
+    const decryptedUsers = decryptData(storedUsers);
+    const users = JSON.parse(decryptedUsers);
+    const userIndex = users.findIndex((u: any) => u.email === email);
+    
+    if (userIndex >= 0 && users[userIndex].password === currentPassword) {
+      users[userIndex].password = newPassword;
+      const encryptedUsers = encryptData(JSON.stringify(users));
+      localStorage.setItem('splitEasyUsers', encryptedUsers);
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+};
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(true);
@@ -160,24 +223,84 @@ const Dashboard = () => {
 
   const handleSignIn = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!signInForm.email || !signInForm.password) return;
+    if (!signInForm.email || !signInForm.password) {
+      toast({
+        title: "Missing Information",
+        description: "Please enter both email and password",
+        variant: "destructive",
+      });
+      return;
+    }
     
-    if (isSignUp && !signInForm.name) return;
+    if (isSignUp) {
+      if (!signInForm.name) {
+        toast({
+          title: "Missing Information", 
+          description: "Please enter your name",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Store new user
+      storeUser(signInForm.email, signInForm.password, signInForm.name);
+      
+      const newUser = {
+        name: signInForm.name,
+        email: signInForm.email,
+      };
 
-    const newUser = {
-      name: signInForm.name || signInForm.email.split('@')[0],
-      email: signInForm.email,
-    };
+      setUser(newUser);
+      setShowSignIn(false);
+      setSignInForm({ email: '', password: '', name: '' });
+      
+      toast({
+        title: "Account Created!",
+        description: "Successfully created your account",
+      });
+    } else {
+      // Validate existing user
+      if (!validatePassword(signInForm.email, signInForm.password)) {
+        toast({
+          title: "Invalid Credentials",
+          description: "Incorrect email or password",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Get user data
+      const storedUsers = localStorage.getItem('splitEasyUsers');
+      if (storedUsers) {
+        try {
+          const decryptedUsers = decryptData(storedUsers);
+          const users = JSON.parse(decryptedUsers);
+          const userData = users.find((u: any) => u.email === signInForm.email);
+          
+          if (userData) {
+            const newUser = {
+              name: userData.name,
+              email: userData.email,
+            };
 
-    setUser(newUser);
-    
-    setShowSignIn(false);
-    setSignInForm({ email: '', password: '', name: '' });
-    
-    toast({
-      title: isSignUp ? "Account Created!" : "Welcome Back!",
-      description: `Successfully ${isSignUp ? 'signed up' : 'signed in'}`,
-    });
+            setUser(newUser);
+            setShowSignIn(false);
+            setSignInForm({ email: '', password: '', name: '' });
+            
+            toast({
+              title: "Welcome Back!",
+              description: "Successfully signed in",
+            });
+          }
+        } catch (error) {
+          toast({
+            title: "Error",
+            description: "Unable to sign in",
+            variant: "destructive",
+          });
+        }
+      }
+    }
   };
 
   const handleSignOut = () => {
@@ -232,6 +355,44 @@ const Dashboard = () => {
 
   const handleUpdateUser = (updatedUser: User) => {
     setUser(updatedUser);
+    
+    // Update stored user data
+    const storedUsers = localStorage.getItem('splitEasyUsers');
+    if (storedUsers && user) {
+      try {
+        const decryptedUsers = decryptData(storedUsers);
+        const users = JSON.parse(decryptedUsers);
+        const userIndex = users.findIndex((u: any) => u.email === user.email);
+        
+        if (userIndex >= 0) {
+          users[userIndex] = { ...users[userIndex], name: updatedUser.name, email: updatedUser.email };
+          const encryptedUsers = encryptData(JSON.stringify(users));
+          localStorage.setItem('splitEasyUsers', encryptedUsers);
+        }
+      } catch (error) {
+        console.error('Error updating user:', error);
+      }
+    }
+  };
+
+  const handlePasswordChange = (currentPassword: string, newPassword: string): boolean => {
+    if (!user) return false;
+    
+    const success = updateUserPassword(user.email, currentPassword, newPassword);
+    if (success) {
+      toast({
+        title: "Password Updated",
+        description: "Your password has been changed successfully",
+      });
+    } else {
+      toast({
+        title: "Password Change Failed",
+        description: "Current password is incorrect",
+        variant: "destructive",
+      });
+    }
+    
+    return success;
   };
 
   const handleCancelEdit = () => {
@@ -511,6 +672,7 @@ const Dashboard = () => {
         <Profile 
           user={user} 
           onUpdateUser={handleUpdateUser}
+          onPasswordChange={handlePasswordChange}
           open={showProfile}
           onOpenChange={setShowProfile}
         />

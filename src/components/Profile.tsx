@@ -15,11 +15,12 @@ interface User {
 interface ProfileProps {
   user: User;
   onUpdateUser: (user: User) => void;
+  onPasswordChange?: (currentPassword: string, newPassword: string) => boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
-const Profile: React.FC<ProfileProps> = ({ user, onUpdateUser, open, onOpenChange }) => {
+const Profile: React.FC<ProfileProps> = ({ user, onUpdateUser, onPasswordChange, open, onOpenChange }) => {
   const [editMode, setEditMode] = useState(false);
   const [profileData, setProfileData] = useState({ ...user, currentPassword: '', newPassword: '' });
   const { toast } = useToast();
@@ -79,13 +80,20 @@ const Profile: React.FC<ProfileProps> = ({ user, onUpdateUser, open, onOpenChang
       return;
     }
 
-    // In a real app, this would make an API call
-    toast({
-      title: "Password Changed",
-      description: "Your password has been updated successfully",
-    });
-    
-    setProfileData({ ...profileData, currentPassword: '', newPassword: '' });
+    // Use the password change function from Dashboard if provided
+    if (onPasswordChange) {
+      const success = onPasswordChange(profileData.currentPassword, profileData.newPassword);
+      if (success) {
+        setProfileData({ ...profileData, currentPassword: '', newPassword: '' });
+      }
+    } else {
+      // Fallback for when function is not provided
+      toast({
+        title: "Password Change Unavailable",
+        description: "Password change functionality is not available",
+        variant: "destructive",
+      });
+    }
   };
 
   return (
