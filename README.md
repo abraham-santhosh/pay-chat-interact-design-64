@@ -184,6 +184,7 @@ Users can create groups for different circles (roommates, trip buddies, etc.) an
 - Integrated with Razorpay for secure payments
 - Supports UPI, cards, net banking, and wallets
 - Real-time payment verification
+- it is not functional because payment server is not connected
 
 ### Email Notifications
 - Group creation notifications
