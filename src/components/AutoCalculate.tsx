@@ -1,8 +1,7 @@
-
 import React from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Calculator, ArrowRight, DollarSign } from 'lucide-react';
+import { Calculator, ArrowRight } from 'lucide-react';
 
 interface Expense {
   id: string;
@@ -141,14 +140,14 @@ const AutoCalculate: React.FC<AutoCalculateProps> = ({ expenses, onSettle }) => 
                 {Object.entries(balance.owes).map(([person, amount]) => (
                   <div key={person} className="flex justify-between text-sm text-red-600 mb-1">
                     <span>Owes {person}</span>
-                    <span>${amount.toFixed(2)}</span>
+                    <span>₹{amount.toFixed(2)}</span>
                   </div>
                 ))}
                 
                 {Object.entries(balance.owed).map(([person, amount]) => (
                   <div key={person} className="flex justify-between text-sm text-green-600 mb-1">
                     <span>{person} owes you</span>
-                    <span>${amount.toFixed(2)}</span>
+                    <span>₹{amount.toFixed(2)}</span>
                   </div>
                 ))}
                 
@@ -156,7 +155,7 @@ const AutoCalculate: React.FC<AutoCalculateProps> = ({ expenses, onSettle }) => 
                   balance.netBalance > 0 ? 'text-green-600' : balance.netBalance < 0 ? 'text-red-600' : 'text-gray-600'
                 }`}>
                   <span>Net Balance</span>
-                  <span>${Math.abs(balance.netBalance).toFixed(2)} {balance.netBalance > 0 ? 'owed' : balance.netBalance < 0 ? 'owes' : ''}</span>
+                  <span>₹{Math.abs(balance.netBalance).toFixed(2)} {balance.netBalance > 0 ? 'owed' : balance.netBalance < 0 ? 'owes' : ''}</span>
                 </div>
               </div>
             ))}
@@ -169,7 +168,7 @@ const AutoCalculate: React.FC<AutoCalculateProps> = ({ expenses, onSettle }) => 
         <Card>
           <CardContent className="p-6">
             <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <DollarSign className="h-5 w-5" />
+              <Calculator className="h-5 w-5" />
               Suggested Settlements
             </h3>
             
@@ -181,7 +180,7 @@ const AutoCalculate: React.FC<AutoCalculateProps> = ({ expenses, onSettle }) => 
                     <ArrowRight className="h-4 w-4 text-gray-500" />
                     <span className="font-medium">{suggestion.to}</span>
                     <span className="text-lg font-bold text-blue-600">
-                      ${suggestion.amount.toFixed(2)}
+                      ₹{suggestion.amount.toFixed(2)}
                     </span>
                   </div>
                   
