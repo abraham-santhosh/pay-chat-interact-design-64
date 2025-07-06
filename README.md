@@ -239,12 +239,11 @@ The application can be deployed to:
 
 ## AI Tools Used
 
-- Lovable AI
-- Grok AI
-- Replit AI
-- Bolt AI
-- Cursor AI
-- ChatGPT
+- Lovable AI  (creating frontend )
+- Grok AI ( debugging errors)
+- Bolt AI ( creating backend)
+- Cursor AI (creating backend)
+- ChatGPT (debugging errors)
 
 ## License
 
