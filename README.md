@@ -23,6 +23,7 @@ AI tools used are
 -Replit
 -Bolt
 -Cursor
+-Chatgpt
 
 
 **Use your preferred IDE**
