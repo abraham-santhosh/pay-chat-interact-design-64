@@ -1,27 +1,14 @@
 import express, { Request, Response } from 'express';
 import cors from 'cors';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
+import { connectDatabase } from './config/database.js';
+import { Group, IGroup } from './models/Group.js';
 import { emailService, NotificationData } from './emailService.js';
 import { paymentService, Payment, PaymentRequest, PaymentVerification } from './paymentService.js';
 
-interface Group {
-  id: string;
+interface GroupInput {
   name: string;
-  description: string;
-  members: string[];
-  createdAt: string;
-  notificationEmails?: string[]; // Optional email list for notifications
-}
-
-// Resolve __dirname in ES modules
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_FILE = join(__dirname, 'groups.json');
-
-// Ensure the data file exists so that JSON.parse doesn't fail on first run
-if (!existsSync(DATA_FILE)) {
-  writeFileSync(DATA_FILE, '[]', 'utf-8');
+  description?: string;
+  notificationEmails?: string[];
 }
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 4000;
@@ -30,196 +17,203 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-/* Helper functions */
-const getGroups = (): Group[] => {
-  try {
-    const raw = readFileSync(DATA_FILE, 'utf-8');
-    return JSON.parse(raw) as Group[];
-  } catch (err) {
-    console.error('Failed to read groups file', err);
-    return [];
-  }
-};
-
-const saveGroups = (groups: Group[]): void => {
-  try {
-    writeFileSync(DATA_FILE, JSON.stringify(groups, null, 2), 'utf-8');
-  } catch (err) {
-    console.error('Failed to write groups file', err);
-  }
-};
+// Connect to MongoDB
+connectDatabase();
 
 /* Routes */
-app.get('/groups', (_req: Request, res: Response<Group[]>) => {
-  res.json(getGroups());
+app.get('/groups', async (_req: Request, res: Response<IGroup[]>) => {
+  try {
+    const groups = await Group.find().sort({ createdAt: -1 });
+    res.json(groups);
+  } catch (error) {
+    console.error('Error fetching groups:', error);
+    res.status(500).json([]);
+  }
 });
 
-app.post('/groups', async (req: Request, res: Response<Group | { error: string }>) => {
-  const { name, description, notificationEmails } = req.body as Partial<Group>;
-  if (!name) {
-    return res.status(400).json({ error: 'Name is required' });
-  }
+app.post('/groups', async (req: Request, res: Response<IGroup | { error: string }>) => {
+  try {
+    const { name, description, notificationEmails } = req.body as GroupInput;
+    if (!name) {
+      return res.status(400).json({ error: 'Name is required' });
+    }
 
-  const groups = getGroups();
-  const newGroup: Group = {
-    id: Date.now().toString(),
-    name,
-    description: description || '',
-    members: [],
-    createdAt: new Date().toISOString(),
-    notificationEmails: notificationEmails || [],
-  };
+    const newGroup = new Group({
+      name,
+      description: description || '',
+      members: [],
+      notificationEmails: notificationEmails || [],
+    });
 
-  groups.push(newGroup);
-  saveGroups(groups);
-
-  // Send notification emails if configured
-  if (newGroup.notificationEmails && newGroup.notificationEmails.length > 0) {
-    const notificationData: NotificationData = {
-      groupName: newGroup.name,
-      groupDescription: newGroup.description,
-      actionType: 'group_created',
-      timestamp: newGroup.createdAt,
-    };
-
-    emailService.sendBulkNotification(newGroup.notificationEmails, notificationData)
-      .then(result => {
-        console.log(`Group creation notification sent to ${result.sent} recipients, ${result.failed} failed`);
-      })
-      .catch(error => {
-        console.error('Failed to send group creation notification:', error);
-      });
-  }
-
-  return res.status(201).json(newGroup);
-});
-
-app.post('/groups/:groupId/members', async (req: Request, res: Response<Group | { error: string }>) => {
-  const { groupId } = req.params;
-  const { username } = req.body as { username?: string };
-
-  if (!username) {
-    return res.status(400).json({ error: 'Username is required' });
-  }
-
-  const groups = getGroups();
-  const group = groups.find((g) => g.id === groupId);
-  if (!group) {
-    return res.status(404).json({ error: 'Group not found' });
-  }
-
-  if (!group.members.includes(username)) {
-    group.members.push(username);
-    saveGroups(groups);
+    const savedGroup = await newGroup.save();
 
     // Send notification emails if configured
-    if (group.notificationEmails && group.notificationEmails.length > 0) {
+    if (savedGroup.notificationEmails && savedGroup.notificationEmails.length > 0) {
+      const notificationData: NotificationData = {
+        groupName: savedGroup.name,
+        groupDescription: savedGroup.description || '',
+        actionType: 'group_created',
+        timestamp: savedGroup.createdAt.toISOString(),
+      };
+
+      emailService.sendBulkNotification(savedGroup.notificationEmails, notificationData)
+        .then(result => {
+          console.log(`Group creation notification sent to ${result.sent} recipients, ${result.failed} failed`);
+        })
+        .catch(error => {
+          console.error('Failed to send group creation notification:', error);
+        });
+    }
+
+    return res.status(201).json(savedGroup);
+  } catch (error) {
+    console.error('Error creating group:', error);
+    return res.status(500).json({ error: 'Failed to create group' });
+  }
+});
+
+app.post('/groups/:groupId/members', async (req: Request, res: Response<IGroup | { error: string }>) => {
+  try {
+    const { groupId } = req.params;
+    const { username } = req.body as { username?: string };
+
+    if (!username) {
+      return res.status(400).json({ error: 'Username is required' });
+    }
+
+    const group = await Group.findById(groupId);
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    if (!group.members.includes(username)) {
+      group.members.push(username);
+      await group.save();
+
+      // Send notification emails if configured
+      if (group.notificationEmails && group.notificationEmails.length > 0) {
+        const notificationData: NotificationData = {
+          groupName: group.name,
+          memberName: username,
+          actionType: 'member_added',
+          timestamp: new Date().toISOString(),
+        };
+
+        emailService.sendBulkNotification(group.notificationEmails, notificationData)
+          .then(result => {
+            console.log(`Member addition notification sent to ${result.sent} recipients, ${result.failed} failed`);
+          })
+          .catch(error => {
+            console.error('Failed to send member addition notification:', error);
+          });
+      }
+    }
+
+    return res.json(group);
+  } catch (error) {
+    console.error('Error adding member:', error);
+    return res.status(500).json({ error: 'Failed to add member' });
+  }
+});
+
+app.delete('/groups/:groupId/members/:username', async (req: Request, res: Response<IGroup | { error: string }>) => {
+  try {
+    const { groupId, username } = req.params;
+
+    const group = await Group.findById(groupId);
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    const wasRemoved = group.members.includes(username);
+    group.members = group.members.filter((m) => m !== username);
+    await group.save();
+
+    // Send notification emails if the member was actually removed and notifications are configured
+    if (wasRemoved && group.notificationEmails && group.notificationEmails.length > 0) {
       const notificationData: NotificationData = {
         groupName: group.name,
         memberName: username,
-        actionType: 'member_added',
+        actionType: 'member_removed',
         timestamp: new Date().toISOString(),
       };
 
       emailService.sendBulkNotification(group.notificationEmails, notificationData)
         .then(result => {
-          console.log(`Member addition notification sent to ${result.sent} recipients, ${result.failed} failed`);
+          console.log(`Member removal notification sent to ${result.sent} recipients, ${result.failed} failed`);
         })
         .catch(error => {
-          console.error('Failed to send member addition notification:', error);
+          console.error('Failed to send member removal notification:', error);
         });
     }
-  }
 
-  return res.json(group);
+    return res.json(group);
+  } catch (error) {
+    console.error('Error removing member:', error);
+    return res.status(500).json({ error: 'Failed to remove member' });
+  }
 });
 
-app.delete('/groups/:groupId/members/:username', async (req: Request, res: Response<Group | { error: string }>) => {
-  const { groupId, username } = req.params;
+app.delete('/groups/:groupId', async (req: Request, res: Response<IGroup | { error: string }>) => {
+  try {
+    const { groupId } = req.params;
+    
+    const group = await Group.findByIdAndDelete(groupId);
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
 
-  const groups = getGroups();
-  const group = groups.find((g) => g.id === groupId);
-  if (!group) {
-    return res.status(404).json({ error: 'Group not found' });
+    // Send notification emails if configured
+    if (group.notificationEmails && group.notificationEmails.length > 0) {
+      const notificationData: NotificationData = {
+        groupName: group.name,
+        actionType: 'group_deleted',
+        timestamp: new Date().toISOString(),
+      };
+
+      emailService.sendBulkNotification(group.notificationEmails, notificationData)
+        .then(result => {
+          console.log(`Group deletion notification sent to ${result.sent} recipients, ${result.failed} failed`);
+        })
+        .catch(error => {
+          console.error('Failed to send group deletion notification:', error);
+        });
+    }
+
+    return res.json(group);
+  } catch (error) {
+    console.error('Error deleting group:', error);
+    return res.status(500).json({ error: 'Failed to delete group' });
   }
-
-  const wasRemoved = group.members.includes(username);
-  group.members = group.members.filter((m) => m !== username);
-  saveGroups(groups);
-
-  // Send notification emails if the member was actually removed and notifications are configured
-  if (wasRemoved && group.notificationEmails && group.notificationEmails.length > 0) {
-    const notificationData: NotificationData = {
-      groupName: group.name,
-      memberName: username,
-      actionType: 'member_removed',
-      timestamp: new Date().toISOString(),
-    };
-
-    emailService.sendBulkNotification(group.notificationEmails, notificationData)
-      .then(result => {
-        console.log(`Member removal notification sent to ${result.sent} recipients, ${result.failed} failed`);
-      })
-      .catch(error => {
-        console.error('Failed to send member removal notification:', error);
-      });
-  }
-
-  return res.json(group);
-});
-
-app.delete('/groups/:groupId', async (req: Request, res: Response<Group | { error: string }>) => {
-  const { groupId } = req.params;
-  const groups = getGroups();
-  const idx = groups.findIndex((g) => g.id === groupId);
-  if (idx === -1) {
-    return res.status(404).json({ error: 'Group not found' });
-  }
-
-  const [removed] = groups.splice(idx, 1);
-  saveGroups(groups);
-
-  // Send notification emails if configured
-  if (removed.notificationEmails && removed.notificationEmails.length > 0) {
-    const notificationData: NotificationData = {
-      groupName: removed.name,
-      actionType: 'group_deleted',
-      timestamp: new Date().toISOString(),
-    };
-
-    emailService.sendBulkNotification(removed.notificationEmails, notificationData)
-      .then(result => {
-        console.log(`Group deletion notification sent to ${result.sent} recipients, ${result.failed} failed`);
-      })
-      .catch(error => {
-        console.error('Failed to send group deletion notification:', error);
-      });
-  }
-
-  return res.json(removed);
 });
 
 /* Notification Management Routes */
 
 // Update notification emails for a group
-app.put('/groups/:groupId/notifications', async (req: Request, res: Response<Group | { error: string }>) => {
-  const { groupId } = req.params;
-  const { notificationEmails } = req.body as { notificationEmails?: string[] };
+app.put('/groups/:groupId/notifications', async (req: Request, res: Response<IGroup | { error: string }>) => {
+  try {
+    const { groupId } = req.params;
+    const { notificationEmails } = req.body as { notificationEmails?: string[] };
 
-  if (!notificationEmails || !Array.isArray(notificationEmails)) {
-    return res.status(400).json({ error: 'notificationEmails array is required' });
+    if (!notificationEmails || !Array.isArray(notificationEmails)) {
+      return res.status(400).json({ error: 'notificationEmails array is required' });
+    }
+
+    const group = await Group.findByIdAndUpdate(
+      groupId, 
+      { notificationEmails }, 
+      { new: true }
+    );
+    
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    return res.json(group);
+  } catch (error) {
+    console.error('Error updating notifications:', error);
+    return res.status(500).json({ error: 'Failed to update notifications' });
   }
-
-  const groups = getGroups();
-  const group = groups.find((g) => g.id === groupId);
-  if (!group) {
-    return res.status(404).json({ error: 'Group not found' });
-  }
-
-  group.notificationEmails = notificationEmails;
-  saveGroups(groups);
-
-  return res.json(group);
 });
 
 // Test email configuration
