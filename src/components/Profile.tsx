@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,22 +7,38 @@ import { User, Edit, Shield, Key } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 interface User {
+  _id: string;
   name: string;
   email: string;
 }
 
 interface ProfileProps {
   user: User;
-  onUpdateUser: (user: User) => void;
-  onPasswordChange?: (currentPassword: string, newPassword: string) => boolean;
+  onUpdateUser: (user: { name: string; email: string }) => void;
+  onPasswordChange?: (currentPassword: string, newPassword: string) => Promise<boolean>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
 
 const Profile: React.FC<ProfileProps> = ({ user, onUpdateUser, onPasswordChange, open, onOpenChange }) => {
   const [editMode, setEditMode] = useState(false);
-  const [profileData, setProfileData] = useState({ ...user, currentPassword: '', newPassword: '' });
+  const [profileData, setProfileData] = useState({ 
+    name: user.name, 
+    email: user.email, 
+    currentPassword: '', 
+    newPassword: '' 
+  });
   const { toast } = useToast();
+
+  // Update local state when user prop changes
+  React.useEffect(() => {
+    setProfileData({
+      name: user.name,
+      email: user.email,
+      currentPassword: '',
+      newPassword: ''
+    });
+  }, [user]);
 
   const handleSaveProfile = (e: React.FormEvent) => {
     e.preventDefault();
@@ -55,13 +70,9 @@ const Profile: React.FC<ProfileProps> = ({ user, onUpdateUser, onPasswordChange,
     });
 
     setEditMode(false);
-    toast({
-      title: "Profile Updated",
-      description: "Your profile has been updated successfully",
-    });
   };
 
-  const handlePasswordChange = () => {
+  const handlePasswordChange = async () => {
     if (!profileData.currentPassword || !profileData.newPassword) {
       toast({
         title: "Password Required",
@@ -80,14 +91,12 @@ const Profile: React.FC<ProfileProps> = ({ user, onUpdateUser, onPasswordChange,
       return;
     }
 
-    // Use the password change function from Dashboard if provided
     if (onPasswordChange) {
-      const success = onPasswordChange(profileData.currentPassword, profileData.newPassword);
+      const success = await onPasswordChange(profileData.currentPassword, profileData.newPassword);
       if (success) {
         setProfileData({ ...profileData, currentPassword: '', newPassword: '' });
       }
     } else {
-      // Fallback for when function is not provided
       toast({
         title: "Password Change Unavailable",
         description: "Password change functionality is not available",

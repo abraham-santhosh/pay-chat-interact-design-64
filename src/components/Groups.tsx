@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Plus, Users, Trash2, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -7,66 +6,59 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
+import { apiService } from '@/services/api';
 
 interface Group {
-  id: string;
+  _id: string;
   name: string;
   description: string;
   members: string[];
   createdAt: string;
+  createdBy: string;
+  notificationEmails?: string[];
+}
+
+interface User {
+  _id: string;
+  name: string;
+  email: string;
 }
 
 interface GroupsProps {
   onGroupSelect: (group: Group | null) => void;
   selectedGroup: Group | null;
+  user: User;
+  onGroupChange: () => void;
 }
 
-const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
+const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup, user, onGroupChange }) => {
   const [groups, setGroups] = useState<Group[]>([]);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showAddMember, setShowAddMember] = useState<string | null>(null);
-  const [newGroupForm, setNewGroupForm] = useState({ name: '', description: '' });
+  const [newGroupForm, setNewGroupForm] = useState({ name: '', description: '', notificationEmails: '' });
   const [newMemberName, setNewMemberName] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const { toast } = useToast();
 
-  // Load groups from localStorage on component mount
+  // Load groups from API on component mount
   useEffect(() => {
-    const loadGroups = () => {
-      try {
-        setIsLoading(true);
-        const storedGroups = localStorage.getItem('groups');
-        if (storedGroups) {
-          const parsedGroups = JSON.parse(storedGroups);
-          setGroups(parsedGroups);
-        }
-      } catch (error) {
-        console.error('Error loading groups from localStorage:', error);
-        toast({
-          title: 'Error',
-          description: 'Failed to load groups from storage',
-          variant: 'destructive',
-        });
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
     loadGroups();
-  }, [toast]);
+  }, [user]);
 
-  // Save groups to localStorage whenever groups change
-  const saveGroups = (updatedGroups: Group[]) => {
+  const loadGroups = async () => {
     try {
-      localStorage.setItem('groups', JSON.stringify(updatedGroups));
-      setGroups(updatedGroups);
+      setIsLoading(true);
+      const groupsData = await apiService.getGroups(user._id);
+      setGroups(groupsData);
     } catch (error) {
-      console.error('Error saving groups to localStorage:', error);
+      console.error('Error loading groups:', error);
       toast({
         title: 'Error',
-        description: 'Failed to save groups',
+        description: 'Failed to load groups',
         variant: 'destructive',
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -75,29 +67,32 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
     if (!newGroupForm.name.trim()) return;
 
     try {
-      const newGroup: Group = {
-        id: Date.now().toString(),
+      const notificationEmails = newGroupForm.notificationEmails
+        .split(',')
+        .map(email => email.trim())
+        .filter(email => email.length > 0);
+
+      const newGroup = await apiService.createGroup({
         name: newGroupForm.name.trim(),
         description: newGroupForm.description.trim(),
-        members: [],
-        createdAt: new Date().toISOString(),
-      };
+        notificationEmails,
+        createdBy: user._id,
+      });
 
-      const updatedGroups = [...groups, newGroup];
-      saveGroups(updatedGroups);
-      
-      setNewGroupForm({ name: '', description: '' });
+      setGroups([newGroup, ...groups]);
+      setNewGroupForm({ name: '', description: '', notificationEmails: '' });
       setShowCreateForm(false);
+      onGroupChange();
 
       toast({
         title: 'Group Created!',
         description: `Created group "${newGroup.name}"`,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating group:', error);
       toast({
         title: 'Error',
-        description: 'Failed to create group',
+        description: error.message || 'Failed to create group',
         variant: 'destructive',
       });
     }
@@ -109,28 +104,25 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
     const memberUsername = newMemberName.trim();
 
     try {
-      const updatedGroups = groups.map((group) => {
-        if (group.id === groupId) {
-          if (!group.members.includes(memberUsername)) {
-            return { ...group, members: [...group.members, memberUsername] };
-          }
-        }
-        return group;
-      });
-
-      saveGroups(updatedGroups);
+      const updatedGroup = await apiService.addMemberToGroup(groupId, memberUsername);
+      
+      setGroups(groups.map(group => 
+        group._id === groupId ? updatedGroup : group
+      ));
+      
       setNewMemberName('');
       setShowAddMember(null);
+      onGroupChange();
 
       toast({
         title: 'Member Added!',
         description: `Added ${memberUsername} to the group`,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error adding member:', error);
       toast({
         title: 'Error',
-        description: 'Failed to add member',
+        description: error.message || 'Failed to add member',
         variant: 'destructive',
       });
     }
@@ -138,24 +130,23 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
 
   const removeMember = async (groupId: string, memberUsername: string) => {
     try {
-      const updatedGroups = groups.map((group) => {
-        if (group.id === groupId) {
-          return { ...group, members: group.members.filter(m => m !== memberUsername) };
-        }
-        return group;
-      });
-
-      saveGroups(updatedGroups);
+      const updatedGroup = await apiService.removeMemberFromGroup(groupId, memberUsername);
+      
+      setGroups(groups.map(group => 
+        group._id === groupId ? updatedGroup : group
+      ));
+      
+      onGroupChange();
 
       toast({
         title: 'Member Removed',
         description: `Removed ${memberUsername} from the group`,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error removing member:', error);
       toast({
         title: 'Error',
-        description: 'Failed to remove member',
+        description: error.message || 'Failed to remove member',
         variant: 'destructive',
       });
     }
@@ -163,23 +154,25 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
 
   const deleteGroup = async (groupId: string) => {
     try {
-      const groupToDelete = groups.find(g => g.id === groupId);
-      const updatedGroups = groups.filter((group) => group.id !== groupId);
-      saveGroups(updatedGroups);
-
-      if (selectedGroup?.id === groupId) {
+      const deletedGroup = await apiService.deleteGroup(groupId);
+      
+      setGroups(groups.filter(group => group._id !== groupId));
+      
+      if (selectedGroup?._id === groupId) {
         onGroupSelect(null);
       }
+      
+      onGroupChange();
 
       toast({
         title: 'Group Deleted',
-        description: `Deleted group "${groupToDelete?.name || 'Unknown'}"`,
+        description: `Deleted group "${deletedGroup.name}"`,
       });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error deleting group:', error);
       toast({
         title: 'Error',
-        description: 'Failed to delete group',
+        description: error.message || 'Failed to delete group',
         variant: 'destructive',
       });
     }
@@ -233,9 +226,9 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {groups.map((group) => (
             <Card 
-              key={group.id} 
+              key={group._id} 
               className={`hover:shadow-lg transition-shadow cursor-pointer ${
-                selectedGroup?.id === group.id ? 'ring-2 ring-purple-500' : ''
+                selectedGroup?._id === group._id ? 'ring-2 ring-purple-500' : ''
               }`}
               onClick={() => onGroupSelect(group)}
             >
@@ -252,7 +245,7 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
                   <Button
                     onClick={(e) => {
                       e.stopPropagation();
-                      deleteGroup(group.id);
+                      deleteGroup(group._id);
                     }}
                     variant="outline"
                     size="sm"
@@ -270,7 +263,7 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
                     <Button
                       onClick={(e) => {
                         e.stopPropagation();
-                        setShowAddMember(group.id);
+                        setShowAddMember(group._id);
                       }}
                       variant="outline"
                       size="sm"
@@ -291,7 +284,7 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
                           <Button
                             onClick={(e) => {
                               e.stopPropagation();
-                              removeMember(group.id, member);
+                              removeMember(group._id, member);
                             }}
                             variant="ghost"
                             size="sm"
@@ -340,6 +333,19 @@ const Groups: React.FC<GroupsProps> = ({ onGroupSelect, selectedGroup }) => {
                 onChange={(e) => setNewGroupForm({...newGroupForm, description: e.target.value})}
                 placeholder="Brief description of the group"
               />
+            </div>
+
+            <div>
+              <Label htmlFor="notificationEmails">Notification Emails (Optional)</Label>
+              <Input
+                id="notificationEmails"
+                value={newGroupForm.notificationEmails}
+                onChange={(e) => setNewGroupForm({...newGroupForm, notificationEmails: e.target.value})}
+                placeholder="email1@example.com, email2@example.com"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Comma-separated email addresses for group notifications
+              </p>
             </div>
             
             <div className="flex gap-2 pt-4">

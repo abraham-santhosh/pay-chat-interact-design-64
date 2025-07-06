@@ -13,105 +13,35 @@ import Profile from './Profile';
 import AutoCalculate from './AutoCalculate';
 import ExpenseChart from './ExpenseChart';
 import { useToast } from '@/hooks/use-toast';
+import { apiService } from '@/services/api';
 
 interface Expense {
-  id: string;
+  _id: string;
   description: string;
   amount: number;
   paidBy: string;
   date: string;
   participants: string[];
   settled: boolean;
+  createdBy: string;
+  groupId?: string;
+  createdAt: string;
 }
 
 interface User {
+  _id: string;
   name: string;
   email: string;
 }
 
 interface Group {
-  id: string;
+  _id: string;
   name: string;
   description: string;
   members: string[];
   createdAt: string;
+  createdBy: string;
 }
-
-// Simple encryption functions (for demonstration - in production use proper encryption)
-const encryptData = (data: string): string => {
-  return btoa(data); // Base64 encoding as basic encryption
-};
-
-const decryptData = (encryptedData: string): string => {
-  try {
-    return atob(encryptedData); // Base64 decoding
-  } catch {
-    return encryptedData; // Return as-is if not encrypted
-  }
-};
-
-// Password validation function
-const validatePassword = (email: string, password: string): boolean => {
-  const storedUsers = localStorage.getItem('splitEasyUsers');
-  if (!storedUsers) return false;
-  
-  try {
-    const decryptedUsers = decryptData(storedUsers);
-    const users = JSON.parse(decryptedUsers);
-    const user = users.find((u: any) => u.email === email);
-    return user && user.password === password;
-  } catch {
-    return false;
-  }
-};
-
-// Store user function
-const storeUser = (email: string, password: string, name: string) => {
-  const storedUsers = localStorage.getItem('splitEasyUsers');
-  let users = [];
-  
-  if (storedUsers) {
-    try {
-      const decryptedUsers = decryptData(storedUsers);
-      users = JSON.parse(decryptedUsers);
-    } catch {
-      users = [];
-    }
-  }
-  
-  // Check if user already exists
-  const existingUserIndex = users.findIndex((u: any) => u.email === email);
-  if (existingUserIndex >= 0) {
-    users[existingUserIndex] = { email, password, name };
-  } else {
-    users.push({ email, password, name });
-  }
-  
-  const encryptedUsers = encryptData(JSON.stringify(users));
-  localStorage.setItem('splitEasyUsers', encryptedUsers);
-};
-
-// Update user password function
-const updateUserPassword = (email: string, currentPassword: string, newPassword: string): boolean => {
-  const storedUsers = localStorage.getItem('splitEasyUsers');
-  if (!storedUsers) return false;
-  
-  try {
-    const decryptedUsers = decryptData(storedUsers);
-    const users = JSON.parse(decryptedUsers);
-    const userIndex = users.findIndex((u: any) => u.email === email);
-    
-    if (userIndex >= 0 && users[userIndex].password === currentPassword) {
-      users[userIndex].password = newPassword;
-      const encryptedUsers = encryptData(JSON.stringify(users));
-      localStorage.setItem('splitEasyUsers', encryptedUsers);
-      return true;
-    }
-    return false;
-  } catch {
-    return false;
-  }
-};
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -130,90 +60,110 @@ const Dashboard = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const { toast } = useToast();
 
-  // Loading screen effect
+  // Load user from localStorage on component mount
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsLoading(false);
     }, 2000);
 
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Load encrypted data from localStorage
-  useEffect(() => {
-    const encryptedExpenses = localStorage.getItem('splitEasyExpenses');
-    if (encryptedExpenses) {
+    const storedUser = localStorage.getItem('splitEasyUser');
+    if (storedUser) {
       try {
-        const decryptedData = decryptData(encryptedExpenses);
-        const parsedExpenses = JSON.parse(decryptedData);
-        setExpenses(parsedExpenses);
-      } catch (error) {
-        console.error('Error loading expenses:', error);
-      }
-    }
-
-    const encryptedUser = localStorage.getItem('splitEasyUser');
-    if (encryptedUser) {
-      try {
-        const decryptedUser = decryptData(encryptedUser);
-        const parsedUser = JSON.parse(decryptedUser);
+        const parsedUser = JSON.parse(storedUser);
         setUser(parsedUser);
       } catch (error) {
         console.error('Error loading user:', error);
+        localStorage.removeItem('splitEasyUser');
       }
     }
+
+    return () => clearTimeout(timer);
   }, []);
 
-  // Save encrypted data to localStorage
-  useEffect(() => {
-    if (expenses.length > 0) {
-      const encryptedExpenses = encryptData(JSON.stringify(expenses));
-      localStorage.setItem('splitEasyExpenses', encryptedExpenses);
-    }
-  }, [expenses]);
-
+  // Load expenses when user changes
   useEffect(() => {
     if (user) {
-      const encryptedUser = encryptData(JSON.stringify(user));
-      localStorage.setItem('splitEasyUser', encryptedUser);
+      loadExpenses();
     }
   }, [user]);
+
+  const loadExpenses = async () => {
+    if (!user) return;
+
+    try {
+      const data = await apiService.getExpenses(user._id, selectedGroup?._id);
+      // Convert the data to match the expected format
+      const formattedExpenses = data.map((expense: any) => ({
+        ...expense,
+        id: expense._id, // Add id for backward compatibility
+      }));
+      setExpenses(formattedExpenses);
+    } catch (error) {
+      console.error('Error loading expenses:', error);
+      toast({
+        title: "Error",
+        description: "Failed to load expenses",
+        variant: "destructive",
+      });
+    }
+  };
 
   const totalExpenses = expenses.reduce((sum, expense) => sum + expense.amount, 0);
   const activeExpenses = expenses.filter(expense => !expense.settled).length;
   const pendingSettlements = Math.floor(activeExpenses / 2);
 
-  const addExpense = (expense: Omit<Expense, 'id' | 'settled'>) => {
-    const newExpense = {
-      ...expense,
-      id: Date.now().toString(),
-      settled: false,
-    };
-    setExpenses([...expenses, newExpense]);
-    setShowExpenseForm(false);
-    toast({
-      title: "Expense Added!",
-      description: `Added ${expense.description} for ₹${expense.amount}`,
-    });
+  const addExpense = async (expense: Omit<Expense, '_id' | 'settled' | 'createdBy' | 'createdAt'>) => {
+    if (!user) return;
+
+    try {
+      const newExpense = await apiService.createExpense({
+        ...expense,
+        createdBy: user._id,
+        groupId: selectedGroup?._id,
+      });
+
+      setExpenses([newExpense, ...expenses]);
+      setShowExpenseForm(false);
+      toast({
+        title: "Expense Added!",
+        description: `Added ${expense.description} for ₹${expense.amount}`,
+      });
+    } catch (error) {
+      console.error('Error adding expense:', error);
+      toast({
+        title: "Error",
+        description: "Failed to add expense",
+        variant: "destructive",
+      });
+    }
   };
 
-  const updateExpense = (updatedExpense: Omit<Expense, 'id' | 'settled'>) => {
-    if (!editingExpense) return;
+  const updateExpense = async (updatedExpense: Omit<Expense, '_id' | 'settled' | 'createdBy' | 'createdAt'>) => {
+    if (!editingExpense || !user) return;
     
-    const updatedExpenses = expenses.map(expense =>
-      expense.id === editingExpense.id
-        ? { ...updatedExpense, id: editingExpense.id, settled: editingExpense.settled }
-        : expense
-    );
-    
-    setExpenses(updatedExpenses);
-    setEditingExpense(null);
-    setShowExpenseForm(false);
-    
-    toast({
-      title: "Expense Updated!",
-      description: `Updated ${updatedExpense.description} for ₹${updatedExpense.amount}`,
-    });
+    try {
+      const updated = await apiService.updateExpense(editingExpense._id, updatedExpense);
+      
+      const updatedExpenses = expenses.map(expense =>
+        expense._id === editingExpense._id ? updated : expense
+      );
+      
+      setExpenses(updatedExpenses);
+      setEditingExpense(null);
+      setShowExpenseForm(false);
+      
+      toast({
+        title: "Expense Updated!",
+        description: `Updated ${updatedExpense.description} for ₹${updatedExpense.amount}`,
+      });
+    } catch (error) {
+      console.error('Error updating expense:', error);
+      toast({
+        title: "Error",
+        description: "Failed to update expense",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleEditExpense = (expense: Expense) => {
@@ -221,7 +171,7 @@ const Dashboard = () => {
     setShowExpenseForm(true);
   };
 
-  const handleSignIn = (e: React.FormEvent) => {
+  const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!signInForm.email || !signInForm.password) {
       toast({
@@ -232,79 +182,61 @@ const Dashboard = () => {
       return;
     }
     
-    if (isSignUp) {
-      if (!signInForm.name) {
-        toast({
-          title: "Missing Information", 
-          description: "Please enter your name",
-          variant: "destructive",
-        });
-        return;
-      }
-      
-      // Store new user
-      storeUser(signInForm.email, signInForm.password, signInForm.name);
-      
-      const newUser = {
-        name: signInForm.name,
-        email: signInForm.email,
-      };
-
-      setUser(newUser);
-      setShowSignIn(false);
-      setSignInForm({ email: '', password: '', name: '' });
-      
-      toast({
-        title: "Account Created!",
-        description: "Successfully created your account",
-      });
-    } else {
-      // Validate existing user
-      if (!validatePassword(signInForm.email, signInForm.password)) {
-        toast({
-          title: "Invalid Credentials",
-          description: "Incorrect email or password",
-          variant: "destructive",
-        });
-        return;
-      }
-      
-      // Get user data
-      const storedUsers = localStorage.getItem('splitEasyUsers');
-      if (storedUsers) {
-        try {
-          const decryptedUsers = decryptData(storedUsers);
-          const users = JSON.parse(decryptedUsers);
-          const userData = users.find((u: any) => u.email === signInForm.email);
-          
-          if (userData) {
-            const newUser = {
-              name: userData.name,
-              email: userData.email,
-            };
-
-            setUser(newUser);
-            setShowSignIn(false);
-            setSignInForm({ email: '', password: '', name: '' });
-            
-            toast({
-              title: "Welcome Back!",
-              description: "Successfully signed in",
-            });
-          }
-        } catch (error) {
+    try {
+      if (isSignUp) {
+        if (!signInForm.name) {
           toast({
-            title: "Error",
-            description: "Unable to sign in",
+            title: "Missing Information", 
+            description: "Please enter your name",
             variant: "destructive",
           });
+          return;
         }
+        
+        const newUser = await apiService.registerUser({
+          name: signInForm.name,
+          email: signInForm.email,
+          password: signInForm.password,
+        });
+
+        setUser(newUser);
+        localStorage.setItem('splitEasyUser', JSON.stringify(newUser));
+        setShowSignIn(false);
+        setSignInForm({ email: '', password: '', name: '' });
+        
+        toast({
+          title: "Account Created!",
+          description: "Successfully created your account",
+        });
+      } else {
+        const userData = await apiService.loginUser({
+          email: signInForm.email,
+          password: signInForm.password,
+        });
+        
+        setUser(userData);
+        localStorage.setItem('splitEasyUser', JSON.stringify(userData));
+        setShowSignIn(false);
+        setSignInForm({ email: '', password: '', name: '' });
+        
+        toast({
+          title: "Welcome Back!",
+          description: "Successfully signed in",
+        });
       }
+    } catch (error: any) {
+      toast({
+        title: isSignUp ? "Registration Failed" : "Sign In Failed",
+        description: error.message || "An error occurred",
+        variant: "destructive",
+      });
     }
   };
 
   const handleSignOut = () => {
     setUser(null);
+    setExpenses([]);
+    setSelectedGroup(null);
     localStorage.removeItem('splitEasyUser');
     toast({
       title: "Signed Out",
@@ -319,19 +251,28 @@ const Dashboard = () => {
     });
   };
 
-  const handleManualSettlement = (expenseId: string) => {
-    setExpenses(expenses.map(expense => 
-      expense.id === expenseId 
-        ? { ...expense, settled: true }
-        : expense
-    ));
-    
-    toast({
-      title: "Expense Settled",
-      description: "Expense has been marked as settled",
-    });
-    
-    setShowSettleUp(false);
+  const handleManualSettlement = async (expenseId: string) => {
+    try {
+      const updated = await apiService.updateExpense(expenseId, { settled: true });
+      
+      setExpenses(expenses.map(expense => 
+        expense._id === expenseId ? updated : expense
+      ));
+      
+      toast({
+        title: "Expense Settled",
+        description: "Expense has been marked as settled",
+      });
+      
+      setShowSettleUp(false);
+    } catch (error) {
+      console.error('Error settling expense:', error);
+      toast({
+        title: "Error",
+        description: "Failed to settle expense",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleAutoSettle = (settlement: { from: string; to: string; amount: number }) => {
@@ -353,46 +294,46 @@ const Dashboard = () => {
     setExpenses(updatedExpenses);
   };
 
-  const handleUpdateUser = (updatedUser: User) => {
-    setUser(updatedUser);
-    
-    // Update stored user data
-    const storedUsers = localStorage.getItem('splitEasyUsers');
-    if (storedUsers && user) {
-      try {
-        const decryptedUsers = decryptData(storedUsers);
-        const users = JSON.parse(decryptedUsers);
-        const userIndex = users.findIndex((u: any) => u.email === user.email);
-        
-        if (userIndex >= 0) {
-          users[userIndex] = { ...users[userIndex], name: updatedUser.name, email: updatedUser.email };
-          const encryptedUsers = encryptData(JSON.stringify(users));
-          localStorage.setItem('splitEasyUsers', encryptedUsers);
-        }
-      } catch (error) {
-        console.error('Error updating user:', error);
-      }
+  const handleUpdateUser = async (updatedUser: { name: string; email: string }) => {
+    if (!user) return;
+
+    try {
+      const updated = await apiService.updateUser(user._id, updatedUser);
+      setUser(updated);
+      localStorage.setItem('splitEasyUser', JSON.stringify(updated));
+      
+      toast({
+        title: "Profile Updated",
+        description: "Your profile has been updated successfully",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Update Failed",
+        description: error.message || "Failed to update profile",
+        variant: "destructive",
+      });
     }
   };
 
-  const handlePasswordChange = (currentPassword: string, newPassword: string): boolean => {
+  const handlePasswordChange = async (currentPassword: string, newPassword: string): Promise<boolean> => {
     if (!user) return false;
     
-    const success = updateUserPassword(user.email, currentPassword, newPassword);
-    if (success) {
+    try {
+      await apiService.updatePassword(user._id, { currentPassword, newPassword });
+      
       toast({
         title: "Password Updated",
         description: "Your password has been changed successfully",
       });
-    } else {
+      return true;
+    } catch (error: any) {
       toast({
         title: "Password Change Failed",
-        description: "Current password is incorrect",
+        description: error.message || "Failed to change password",
         variant: "destructive",
       });
+      return false;
     }
-    
-    return success;
   };
 
   const handleCancelEdit = () => {
@@ -542,9 +483,9 @@ const Dashboard = () => {
                       </div>
                     ) : (
                       <div className="space-y-4 max-h-96 overflow-y-auto">
-                        {expenses.slice(-10).reverse().map((expense) => (
+                        {expenses.slice(0, 10).map((expense) => (
                           <div 
-                            key={expense.id} 
+                            key={expense._id} 
                             className={`flex justify-between items-center p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors ${
                               expense.settled ? 'opacity-60' : ''
                             }`}
@@ -586,7 +527,12 @@ const Dashboard = () => {
             </TabsContent>
 
             <TabsContent value="groups">
-              <Groups onGroupSelect={setSelectedGroup} selectedGroup={selectedGroup} />
+              <Groups 
+                onGroupSelect={setSelectedGroup} 
+                selectedGroup={selectedGroup}
+                user={user}
+                onGroupChange={loadExpenses}
+              />
             </TabsContent>
 
             <TabsContent value="calculate">
@@ -609,7 +555,7 @@ const Dashboard = () => {
                     <div className="space-y-4">
                       {expenses.map((expense) => (
                         <div 
-                          key={expense.id} 
+                          key={expense._id} 
                           className={`flex justify-between items-center p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors ${
                             expense.settled ? 'opacity-60' : ''
                           }`}
@@ -783,13 +729,13 @@ const Dashboard = () => {
             
             <div className="max-h-64 overflow-y-auto space-y-2">
               {expenses.filter(expense => !expense.settled).map((expense) => (
-                <div key={expense.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                <div key={expense._id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                   <div>
                     <h4 className="font-semibold text-gray-800">{expense.description}</h4>
                     <p className="text-sm text-gray-600">₹{expense.amount.toFixed(2)}</p>
                   </div>
                   <Button
-                    onClick={() => handleManualSettlement(expense.id)}
+                    onClick={() => handleManualSettlement(expense._id)}
                     size="sm"
                     className="bg-green-600 hover:bg-green-700"
                   >
