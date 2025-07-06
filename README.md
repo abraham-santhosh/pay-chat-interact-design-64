@@ -4,6 +4,8 @@
 
 **URL**: https://lovable.dev/projects/5885f59d-f015-482e-a528-0a3af452c709
 
+SplitEase is a modern web/mobile application designed to simplify bill splitting among friends, roommates, or groups. Whether you're dining out, traveling, or sharing expenses, SplitEase makes it effortless to track and settle shared costs transparently.
+
 ## How can I edit this code?
 
 There are several ways of editing your application.
